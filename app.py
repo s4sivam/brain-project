@@ -13,15 +13,10 @@ from collections import deque
 # --- Global State & Config ---
 NEURO_FILE = "neuron_net_final.py"
 
-# Use Koyeb's free persistent disk at /data
-KOYEB_DATA_DIR = "/data" 
-if os.path.exists(KOYEB_DATA_DIR):
-    CHECKPOINT_DIR = os.path.join(KOYEB_DATA_DIR, "checkpoints")
-    SNAPSHOT_DIR = os.path.join(KOYEB_DATA_DIR, "snapshots")
-else:
-    # Fallback for local testing
-    CHECKPOINT_DIR = "checkpoints"
-    SNAPSHOT_DIR = "snapshots"
+# Use a local folder for persistence. 
+# GitHub Codespaces will save this folder's contents.
+CHECKPOINT_DIR = "checkpoints"
+SNAPSHOT_DIR = "snapshots"
 
 os.makedirs(CHECKPOINT_DIR, exist_ok=True)
 os.makedirs(SNAPSHOT_DIR, exist_ok=True)
@@ -117,7 +112,7 @@ def runner_loop():
     print("Brain thread received stop signal and is exiting gracefully.")
 
 # --- AI TWIN LOGIC (Now inside the server) ---
-OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY") # We will set this on Koyeb
+OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY") # We will set this in Codespace Secrets
 
 def get_sentiment(text):
     pos = ["steady", "curious", "learning", "strong", "connected", "reward", "flow", "calm", "stable"]
@@ -131,7 +126,7 @@ def get_sentiment(text):
 
 def call_llm(prompt):
     if not OPENAI_API_KEY: 
-        return "(Simulated) Set OPENAI_API_KEY in Koyeb secrets to enable thought."
+        return "(Simulated) Set OPENAI_API_KEY in Codespace secrets to enable thought."
     
     headers = {"Authorization": f"Bearer {OPENAI_API_KEY}", "Content-Type": "application/json"}
     payload = {
@@ -291,10 +286,6 @@ async def ws_endpoint(ws: WebSocket):
         print("WebSocket connection closed.")
     finally: clients.remove(ws)
 
-# We don't need these public endpoints anymore, the twin talks to itself
-# @app.post("/twin")
-# @app.post("/set_params")
-
 @app.post("/save_snapshot")
 async def save_snapshot(name: str = Form(...), data_url: str = Form(...)):
     try:
@@ -305,4 +296,6 @@ async def save_snapshot(name: str = Form(...), data_url: str = Form(...)):
 
 if __name__ == "__main__":
     print("Starting Brain 2.0 Server (Unified)...")
-    uvicorn.run(app, host="127.0.0.1", port=8000)
+    # GitHub Codespaces provides the PORT environment variable
+    port = int(os.environ.get("PORT", 8000))
+    uvicorn.run(app, host="0.0.0.0", port=port)
