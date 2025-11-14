@@ -11,7 +11,7 @@ from contextlib import asynccontextmanager
 from collections import deque
 
 # --- Global State & Config ---
-NEURO_FILE = "neuron_net_final.py"
+NEURO_FILE = "neuron_net_chaos.py"
 
 # Use a local folder for persistence. 
 # GitHub Codespaces will save this folder's contents.
@@ -299,3 +299,4 @@ if __name__ == "__main__":
     # GitHub Codespaces provides the PORT environment variable
     port = int(os.environ.get("PORT", 8000))
     uvicorn.run(app, host="0.0.0.0", port=port)
+
