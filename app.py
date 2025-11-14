@@ -1,11 +1,11 @@
 # app.py
-# (Formerly server_final.py)
 # FINAL VERSION with RELIABLE Persistent Memory (Lifespan + Thread Event)
+# With Render.com Health Check Fix + HTMLResponse
 
 import importlib.util, threading, time, json, os, asyncio, base64
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, Form, Body
-from fastapi.responses import FileResponse, JSONResponse
-from fastapi.middleware.cors import CORSMiddleware # Added for safety
+from fastapi.responses import FileResponse, JSONResponse, HTMLResponse # Import HTMLResponse
+from fastapi.middleware.cors import CORSMiddleware
 import uvicorn
 from threading import Lock, Thread, Event
 from contextlib import asynccontextmanager
@@ -14,13 +14,19 @@ from contextlib import asynccontextmanager
 NEURO_FILE = "neuron_net_final.py"
 CHECKPOINT_DIR = "checkpoints"
 SNAPSHOT_DIR = "snapshots"
+# Use /data for persistent storage on Render (Free tier)
+RENDER_DATA_DIR = "/data"
+if os.path.exists(RENDER_DATA_DIR):
+    CHECKPOINT_DIR = os.path.join(RENDER_DATA_DIR, "checkpoints")
+    SNAPSHOT_DIR = os.path.join(RENDER_DATA_DIR, "snapshots")
+
 os.makedirs(CHECKPOINT_DIR, exist_ok=True)
 os.makedirs(SNAPSHOT_DIR, exist_ok=True)
 
 DEFAULT_CHECKPOINT = os.path.join(CHECKPOINT_DIR, "default.json")
 clients = set()
 state_lock = Lock()
-stop_event = Event() # Global event to signal threads to stop
+stop_event = Event() 
 
 brain_runtime = {"module": None, "net": None, "thread": None} 
 latest_state = {
@@ -52,7 +58,7 @@ def runner_loop():
             brain.load_checkpoint(net, DEFAULT_CHECKPOINT)
             print(f"✅ Brain memory loaded from {DEFAULT_CHECKPOINT}")
         else:
-            print("No default checkpoint found. Starting fresh.")
+            print(f"No default checkpoint found at {DEFAULT_CHECKPOINT}. Starting fresh.")
     except Exception as e:
         print(f"Error loading checkpoint: {e}")
 
@@ -71,7 +77,7 @@ def runner_loop():
                     if cmd == "reset":
                         print("[CMD] Resetting brain network...")
                         net = brain.Network(brain.N_INPUT, brain.N_HIDDEN, brain.N_OUTPUT)
-                        brain_runtime["net"] = net # Re-assign the new net
+                        brain_runtime["net"] = net 
                         if os.path.exists(DEFAULT_CHECKPOINT):
                             os.remove(DEFAULT_CHECKPOINT)
                 except Exception as e: print(f"Cmd Error: {e}")
@@ -123,14 +129,14 @@ async def lifespan(app: FastAPI):
     stop_event.set() 
     brain_thread.join(timeout=5.0) 
 
-    print("Saving brain state...")
+    print(f"Saving brain state to {DEFAULT_CHECKPOINT}...")
     brain = brain_runtime.get("module")
     net = brain_runtime.get("net")
     
     if brain and net and hasattr(brain, "save_checkpoint"):
         try:
             brain.save_checkpoint(net.synapses, fname=DEFAULT_CHECKPOINT)
-            print(f"✅ Brain memory saved to {DEFAULT_CHECKPOINT}")
+            print(f"✅ Brain memory saved.")
         except Exception as e:
             print(f"Error saving checkpoint on shutdown: {e}")
     else:
@@ -139,19 +145,27 @@ async def lifespan(app: FastAPI):
 # --- Initialize FastAPI App ---
 app = FastAPI(lifespan=lifespan)
 
-# Add CORS middleware to allow cross-origin requests (important for free hosts)
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"], # Allows all origins
+    allow_origins=["*"], 
     allow_credentials=True,
-    allow_methods=["*"], # Allows all methods
-    allow_headers=["*"], # Allows all headers
+    allow_methods=["*"], 
+    allow_headers=["*"], 
 )
 
 # --- API Endpoints ---
-@app.get("/")
+@app.api_route("/", methods=["GET", "HEAD"])  # <-- FIX 1
 async def index():
-    return FileResponse("monitor_final.html")
+    html_path = "monitor_final.html"
+    if not os.path.exists(html_path): # <-- FIX 2 (Better Errors)
+        print(f"CRITICAL ERROR: {html_path} not found!")
+        return JSONResponse(
+            status_code=404, 
+            content={"error": f"{html_path} not found on server. Make sure it is in your GitHub repo."}
+        )
+    with open(html_path, "r") as f:
+        html_content = f.read()
+    return HTMLResponse(content=html_content)
 
 @app.websocket("/ws")
 async def ws_endpoint(ws: WebSocket):
@@ -198,6 +212,5 @@ async def save_snapshot(name: str = Form(...), data_url: str = Form(...)):
     except Exception as e: return {"ok": False, "error": str(e)}
 
 if __name__ == "__main__":
-    # This block is for local running only. Render will use its own command.
     print("Starting Brain 2.0 Server with Persistent Memory...")
     uvicorn.run(app, host="127.0.0.1", port=8000)
