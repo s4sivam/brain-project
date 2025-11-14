@@ -1,0 +1,165 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Brain 2.0 Final Monitor</title>
+    <style>
+        body { background: #0f172a; color: #e2e8f0; font-family: monospace; margin: 20px; }
+        .grid { display: grid; grid-template-columns: 3fr 1fr; gap: 20px; }
+        .panel { background: #1e293b; padding: 15px; border-radius: 8px; border: 1px solid #334155; }
+        canvas { width: 100%; background: #020617; border-radius: 4px; }
+        .twin-box { margin-top: 20px; border-left: 4px solid #3b82f6; padding-left: 15px; }
+        .twin-text { font-size: 1.1em; font-style: italic; color: #93c5fd; }
+        .sentiment-bar { height: 4px; background: #334155; margin-top: 5px; position: relative; }
+        .sentiment-val { height: 100%; background: #22c55e; width: 50%; transition: width 0.5s; }
+        input[type=range] { width: 100%; }
+    </style>
+</head>
+<body>
+    <h1>🧠 Shivam's Brain 2.0</h1>
+    
+    <div class="grid">
+        <div>
+            <div class="panel">
+                <h3>Neural Raster Plot (Tick: <span id="tick">0</span>)</h3>
+                <canvas id="rasterCanvas" height="200" width="800"></canvas>
+            </div>
+            
+            <div class="panel twin-box">
+                <h3>🤖 AI Twin Consciousness</h3>
+                <p id="twinText" class="twin-text">Waiting for thought stream...</p>
+                <div class="sentiment-bar">
+                    <div id="sentiment" class="sentiment-val"></div>
+                </div>
+            </div>
+        </div>
+
+        <div class="panel">
+            <h3>Synaptic Parameters</h3>
+            <label>Learning Rate (A_PLUS)</label>
+            <input type="range" id="A_PLUS" min="0" max="0.1" step="0.001">
+            <span id="val_A_PLUS"></span>
+
+            <label>Reward Sensitivity</label>
+            <input type="range" id="NO_REWARD_SCALE" min="0" max="0.5" step="0.01">
+            <span id="val_NO_REWARD_SCALE"></span>
+            
+            <hr style="border-color: #334155">
+            <h3>Histogram (H->O)</h3>
+            <div id="hist" style="font-size: 0.8em;"></div>
+            
+            <button onclick="sendCmd('save')" style="margin-top:10px; padding:8px; width:100%; background:#2563eb; color:white; border:none; border-radius:4px; cursor:pointer;">
+                Save Checkpoint
+            </button>
+            <button onclick="sendCmd('reset')" style="margin-top:5px; padding:8px; width:100%; background:#ef4444; color:white; border:none; border-radius:4px; cursor:pointer;">
+                Reset Brain
+            </button>
+        </div>
+    </div>
+
+    <script>
+        const ws = new WebSocket("ws://" + location.host + "/ws");
+        const ctx = document.getElementById("rasterCanvas").getContext("2d");
+        
+        let spikeHist = [];
+        let lastTickProcessed = -1; // Track which ticks we have already drawn
+        
+        ws.onmessage = (event) => {
+            const msg = JSON.parse(event.data);
+            if (msg.type !== "snapshot") return;
+            
+            const state = msg.state;
+            const serverTick = state.tick;
+            
+            document.getElementById("tick").innerText = serverTick;
+            document.getElementById("twinText").innerText = state.twin_text || "Silence...";
+            
+            // Sentiment Visualization
+            const sent = (state.twin_sentiment + 1) / 2 * 100;
+            document.getElementById("sentiment").style.width = sent + "%";
+            document.getElementById("sentiment").style.background = sent > 50 ? "#22c55e" : "#ef4444";
+
+            // Update Sliders
+            updateSlider("A_PLUS", state.params.A_PLUS);
+            updateSlider("NO_REWARD_SCALE", state.params.NO_REWARD_SCALE);
+            
+            // --- INTELLIGENT DATA SYNC ---
+            // Determine how many new frames we missed since last update
+            
+            // Case A: Reset happened (server tick dropped back to 0)
+            if (serverTick < lastTickProcessed) {
+                spikeHist = [];
+                lastTickProcessed = -1;
+            }
+            
+            // Case B: Normal update (catch up on missed ticks)
+            // state.spikes contains the last 400 ticks. 
+            // We want the slice from [lastTickProcessed+1] to [serverTick]
+            
+            if (state.spikes && state.spikes.length > 0) {
+                // Calculate the index in the buffer corresponding to the current tick
+                // state.spikes ends at serverTick. 
+                // So index (length-1) is serverTick.
+                // We need to grab 'gap' number of items from the end.
+                
+                let gap = serverTick - lastTickProcessed;
+                if (gap > 0) {
+                    // Don't grab more than the buffer holds
+                    if (gap > state.spikes.length) gap = state.spikes.length;
+                    
+                    // Get the new slices
+                    const newFrames = state.spikes.slice(-gap);
+                    
+                    // Add them to our history
+                    newFrames.forEach(frame => spikeHist.push(frame));
+                    lastTickProcessed = serverTick;
+                }
+            }
+            
+            // Trim history to fit screen
+            if(spikeHist.length > 200) {
+                spikeHist = spikeHist.slice(spikeHist.length - 200);
+            }
+            
+            drawRaster(spikeHist);
+            
+            // Draw Hist
+            let h = "";
+            for(let [k,v] of Object.entries(state.weights_hist)) h += `${k}: ${v}<br>`;
+            document.getElementById("hist").innerHTML = h;
+        };
+
+        function drawRaster(hist) {
+            ctx.fillStyle = "#020617";
+            ctx.fillRect(0,0,800,200);
+            const cw = 800 / 200;
+            const ch = 200 / 12; // Approx neuron count
+            
+            hist.forEach((fired, x) => {
+                if (!fired) return;
+                fired.forEach(idx => {
+                    ctx.fillStyle = idx < 3 ? "#3b82f6" : (idx > 10 ? "#ef4444" : "#22c55e");
+                    ctx.fillRect(x * cw, idx * ch, cw-1, ch-1);
+                });
+            });
+        }
+
+        function updateSlider(id, val) {
+            const el = document.getElementById(id);
+            if(Math.abs(el.value - val) > 0.001 && document.activeElement !== el) {
+                el.value = val;
+                document.getElementById("val_"+id).innerText = val.toFixed(4);
+            }
+        }
+
+        document.querySelectorAll("input[type=range]").forEach(el => {
+            el.oninput = (e) => {
+                const p = {}; p[e.target.id] = e.target.value;
+                ws.send(JSON.stringify({type: "set", params: p}));
+                document.getElementById("val_"+e.target.id).innerText = e.target.value;
+            }
+        });
+
+        function sendCmd(c) { ws.send(JSON.stringify({type: "cmd", cmd: c})); }
+    </script>
+</body>
+</html>
