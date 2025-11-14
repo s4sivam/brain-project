@@ -1,10 +1,10 @@
 # app.py
 # FINAL VERSION with RELIABLE Persistent Memory (Lifespan + Thread Event)
-# With Render.com Health Check Fix + HTMLResponse
+# With Render.com Health Check Fix + Persistent Disk
 
 import importlib.util, threading, time, json, os, asyncio, base64
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, Form, Body
-from fastapi.responses import FileResponse, JSONResponse, HTMLResponse # Import HTMLResponse
+from fastapi.responses import FileResponse, JSONResponse, HTMLResponse
 from fastapi.middleware.cors import CORSMiddleware
 import uvicorn
 from threading import Lock, Thread, Event
@@ -12,21 +12,20 @@ from contextlib import asynccontextmanager
 
 # --- Global State & Config ---
 NEURO_FILE = "neuron_net_final.py"
-CHECKPOINT_DIR = "checkpoints"
-SNAPSHOT_DIR = "snapshots"
-# Use /data for persistent storage on Render (Free tier)
-RENDER_DATA_DIR = "/data"
-if os.path.exists(RENDER_DATA_DIR):
-    CHECKPOINT_DIR = os.path.join(RENDER_DATA_DIR, "checkpoints")
-    SNAPSHOT_DIR = os.path.join(RENDER_DATA_DIR, "snapshots")
 
+# Use Render's free persistent disk at /data
+RENDER_DATA_DIR = "/data" 
+CHECKPOINT_DIR = os.path.join(RENDER_DATA_DIR, "checkpoints")
+SNAPSHOT_DIR = os.path.join(RENDER_DATA_DIR, "snapshots")
+
+# Create directories if they don't exist
 os.makedirs(CHECKPOINT_DIR, exist_ok=True)
 os.makedirs(SNAPSHOT_DIR, exist_ok=True)
 
 DEFAULT_CHECKPOINT = os.path.join(CHECKPOINT_DIR, "default.json")
 clients = set()
 state_lock = Lock()
-stop_event = Event() 
+stop_event = Event() # Global event to signal threads to stop
 
 brain_runtime = {"module": None, "net": None, "thread": None} 
 latest_state = {
@@ -77,7 +76,7 @@ def runner_loop():
                     if cmd == "reset":
                         print("[CMD] Resetting brain network...")
                         net = brain.Network(brain.N_INPUT, brain.N_HIDDEN, brain.N_OUTPUT)
-                        brain_runtime["net"] = net 
+                        brain_runtime["net"] = net # Re-assign the new net
                         if os.path.exists(DEFAULT_CHECKPOINT):
                             os.remove(DEFAULT_CHECKPOINT)
                 except Exception as e: print(f"Cmd Error: {e}")
@@ -154,15 +153,16 @@ app.add_middleware(
 )
 
 # --- API Endpoints ---
-@app.api_route("/", methods=["GET", "HEAD"])  # <-- FIX 1
+@app.api_route("/", methods=["GET", "HEAD"])  # <-- THIS IS THE FIX FOR "405 Method Not Allowed"
 async def index():
     html_path = "monitor_final.html"
-    if not os.path.exists(html_path): # <-- FIX 2 (Better Errors)
+    if not os.path.exists(html_path): 
         print(f"CRITICAL ERROR: {html_path} not found!")
         return JSONResponse(
             status_code=404, 
             content={"error": f"{html_path} not found on server. Make sure it is in your GitHub repo."}
         )
+    # Read the file and return it as HTML
     with open(html_path, "r") as f:
         html_content = f.read()
     return HTMLResponse(content=html_content)
