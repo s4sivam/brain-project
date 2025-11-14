@@ -1,24 +1,28 @@
 # app.py
-# FINAL VERSION with RELIABLE Persistent Memory (Lifespan + Thread Event)
-# With Render.com Health Check Fix + Persistent Disk
+# FINAL UNIFIED SERVER (Brain + Server + AI Twin in one file)
 
-import importlib.util, threading, time, json, os, asyncio, base64
+import importlib.util, threading, time, json, os, asyncio, base64, requests, websockets
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, Form, Body
 from fastapi.responses import FileResponse, JSONResponse, HTMLResponse
 from fastapi.middleware.cors import CORSMiddleware
 import uvicorn
 from threading import Lock, Thread, Event
 from contextlib import asynccontextmanager
+from collections import deque
 
 # --- Global State & Config ---
 NEURO_FILE = "neuron_net_final.py"
 
-# Use Render's free persistent disk at /data
-RENDER_DATA_DIR = "/data" 
-CHECKPOINT_DIR = os.path.join(RENDER_DATA_DIR, "checkpoints")
-SNAPSHOT_DIR = os.path.join(RENDER_DATA_DIR, "snapshots")
+# Use Koyeb's free persistent disk at /data
+KOYEB_DATA_DIR = "/data" 
+if os.path.exists(KOYEB_DATA_DIR):
+    CHECKPOINT_DIR = os.path.join(KOYEB_DATA_DIR, "checkpoints")
+    SNAPSHOT_DIR = os.path.join(KOYEB_DATA_DIR, "snapshots")
+else:
+    # Fallback for local testing
+    CHECKPOINT_DIR = "checkpoints"
+    SNAPSHOT_DIR = "snapshots"
 
-# Create directories if they don't exist
 os.makedirs(CHECKPOINT_DIR, exist_ok=True)
 os.makedirs(SNAPSHOT_DIR, exist_ok=True)
 
@@ -76,7 +80,7 @@ def runner_loop():
                     if cmd == "reset":
                         print("[CMD] Resetting brain network...")
                         net = brain.Network(brain.N_INPUT, brain.N_HIDDEN, brain.N_OUTPUT)
-                        brain_runtime["net"] = net # Re-assign the new net
+                        brain_runtime["net"] = net 
                         if os.path.exists(DEFAULT_CHECKPOINT):
                             os.remove(DEFAULT_CHECKPOINT)
                 except Exception as e: print(f"Cmd Error: {e}")
@@ -112,6 +116,109 @@ def runner_loop():
 
     print("Brain thread received stop signal and is exiting gracefully.")
 
+# --- AI TWIN LOGIC (Now inside the server) ---
+OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY") # We will set this on Koyeb
+
+def get_sentiment(text):
+    pos = ["steady", "curious", "learning", "strong", "connected", "reward", "flow", "calm", "stable"]
+    neg = ["weak", "decay", "loss", "chaos", "noise", "empty", "scattered", "fray", "pressure"]
+    score = 0; text_lower = text.lower()
+    for w in pos:
+        if w in text_lower: score += 0.2
+    for w in neg:
+        if w in text_lower: score -= 0.2
+    return max(-1.0, min(1.0, score))
+
+def call_llm(prompt):
+    if not OPENAI_API_KEY: 
+        return "(Simulated) Set OPENAI_API_KEY in Koyeb secrets to enable thought."
+    
+    headers = {"Authorization": f"Bearer {OPENAI_API_KEY}", "Content-Type": "application/json"}
+    payload = {
+        "model": "gpt-3.5-turbo",
+        "messages": [
+            {"role": "system", "content": "You are the consciousness of a digital neural network. Describe your feelings (stability, chaos, learning, decay) in one short, abstract sentence."},
+            {"role": "user", "content": prompt}
+        ], "max_tokens": 60, "temperature": 0.7
+    }
+    
+    for attempt in range(3):
+        try:
+            r = requests.post("https://api.openai.com/v1/chat/completions", headers=headers, json=payload, timeout=10)
+            if r.status_code == 200:
+                return r.json()["choices"][0]["message"]["content"]
+            elif r.status_code == 429:
+                print(f"[AI Twin] Rate limited, backing off for {2**attempt}s...")
+                time.sleep(2 ** attempt)
+        except requests.exceptions.RequestException as e:
+            print(f"[AI Twin] Network error: {e}")
+            time.sleep(1)
+    return "Thinking... (API busy)"
+
+def ai_twin_loop():
+    """This function runs in a separate thread and 'thinks'."""
+    print("AI Twin thread started.")
+    tick_buffer = []
+    last_request = 0
+    
+    while not stop_event.is_set():
+        try:
+            # Wait for the brain to be running
+            if not brain_runtime.get("net"):
+                time.sleep(1)
+                continue
+                
+            # Get latest state
+            with state_lock:
+                state = dict(latest_state)
+            
+            tick = state.get("tick", 0)
+            spikes = state.get("spikes", [])
+            last_spikes = len(spikes[-1]) if spikes else 0
+            weights = state.get("weights_hist", {})
+            strong_synapses = sum(v for k,v in weights.items() if float(k) > 0.8)
+            
+            tick_buffer.append({"t": tick, "spikes": last_spikes, "strong": strong_synapses})
+            
+            if len(tick_buffer) < 8: # Batch size of 8
+                time.sleep(1) # Check state every 1 second
+                continue 
+            
+            avg_spikes = sum(x["spikes"] for x in tick_buffer)/len(tick_buffer)
+            avg_strong = sum(x["strong"] for x in tick_buffer)/len(tick_buffer)
+            tick_buffer.clear() 
+            
+            now = time.time()
+            if now - last_request < 15.0: # 15s request interval
+                time.sleep(1)
+                continue
+            last_request = now
+            
+            prompt = (f"Status Report:\n"
+                      f"- Tick: {tick}\n"
+                      f"- Avg Activity (last batch): {avg_spikes:.1f} spikes/tick\n"
+                      f"- Strong Connections: {avg_strong:.1f}\n\n"
+                      f"How does the network feel about its structural stability?")
+            
+            thought = call_llm(prompt)
+            sentiment = get_sentiment(thought)
+            
+            print(f"Twin Thought (Sentiment: {sentiment:.2f}): {thought}")
+            
+            # Post thought to self
+            with state_lock:
+                latest_state["twin_text"] = thought
+                latest_state["twin_sentiment"] = sentiment
+            
+            # Inject bias
+            if abs(sentiment) > 0.5:
+                if sentiment > 0: shared_control["NO_REWARD_SCALE"] = 0.02 
+                else: shared_control["NO_REWARD_SCALE"] = 0.05
+        
+        except Exception as e:
+            print(f"Error in ai_twin_loop: {e}")
+            time.sleep(5) # Don't spam errors
+
 # --- LIFESPAN EVENT HANDLER ---
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -121,12 +228,18 @@ async def lifespan(app: FastAPI):
     brain_runtime["thread"] = brain_thread
     brain_thread.start()
     
+    print("Starting AI Twin thread...")
+    twin_thread = Thread(target=ai_twin_loop, daemon=False)
+    brain_runtime["twin_thread"] = twin_thread
+    twin_thread.start()
+    
     yield
     
     # --- SHUTDOWN LOGIC ---
-    print("\nShutdown signal received. Stopping brain thread...")
+    print("\nShutdown signal received. Stopping all threads...")
     stop_event.set() 
     brain_thread.join(timeout=5.0) 
+    twin_thread.join(timeout=5.0)
 
     print(f"Saving brain state to {DEFAULT_CHECKPOINT}...")
     brain = brain_runtime.get("module")
@@ -143,26 +256,14 @@ async def lifespan(app: FastAPI):
 
 # --- Initialize FastAPI App ---
 app = FastAPI(lifespan=lifespan)
-
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"], 
-    allow_credentials=True,
-    allow_methods=["*"], 
-    allow_headers=["*"], 
-)
+app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_credentials=True, allow_methods=["*"], allow_headers=["*"])
 
 # --- API Endpoints ---
-@app.api_route("/", methods=["GET", "HEAD"])  # <-- THIS IS THE FIX FOR "405 Method Not Allowed"
+@app.api_route("/", methods=["GET", "HEAD"])
 async def index():
     html_path = "monitor_final.html"
     if not os.path.exists(html_path): 
-        print(f"CRITICAL ERROR: {html_path} not found!")
-        return JSONResponse(
-            status_code=404, 
-            content={"error": f"{html_path} not found on server. Make sure it is in your GitHub repo."}
-        )
-    # Read the file and return it as HTML
+        return JSONResponse(status_code=404, content={"error": "monitor_final.html not found."})
     with open(html_path, "r") as f:
         html_content = f.read()
     return HTMLResponse(content=html_content)
@@ -190,18 +291,9 @@ async def ws_endpoint(ws: WebSocket):
         print("WebSocket connection closed.")
     finally: clients.remove(ws)
 
-@app.post("/twin")
-async def post_twin_thought(payload: dict = Body(...)):
-    with state_lock:
-        latest_state["twin_text"] = payload.get("text", "")
-        latest_state["twin_sentiment"] = payload.get("sentiment", 0.0)
-    return {"status": "ok"}
-
-@app.post("/set_params")
-async def inject_params(payload: dict = Body(...)):
-    print(f"[INJECTION] Twin modifying params: {payload}")
-    shared_control.update(payload)
-    return {"status": "ok"}
+# We don't need these public endpoints anymore, the twin talks to itself
+# @app.post("/twin")
+# @app.post("/set_params")
 
 @app.post("/save_snapshot")
 async def save_snapshot(name: str = Form(...), data_url: str = Form(...)):
@@ -212,5 +304,5 @@ async def save_snapshot(name: str = Form(...), data_url: str = Form(...)):
     except Exception as e: return {"ok": False, "error": str(e)}
 
 if __name__ == "__main__":
-    print("Starting Brain 2.0 Server with Persistent Memory...")
+    print("Starting Brain 2.0 Server (Unified)...")
     uvicorn.run(app, host="127.0.0.1", port=8000)
