@@ -1,6 +1,6 @@
 # neuron_net_final.py
 # The Core SNN Engine (Optimized V7 Super Bootstrap)
-print("LOADING NEURON_NET_FINAL... (Global functions check)") 
+# FINAL VERSION
 
 import random, math, json, os
 from collections import deque
@@ -216,14 +216,19 @@ class Network:
                     factor = OUTGOING_SUM_LIMIT / ssum
                     for s in outs: s.w = max(W_MIN, s.w * factor)
 
-# --- Persistence Methods ---
-# These are strictly OUTSIDE the class Network
+# --- Persistence Methods (Corrected Indentation) ---
+# These are OUTSIDE the class Network
+
 def save_checkpoint(synapses, fname):
+    """Saves the network state to a JSON file."""
     data = [{"pre":s.pre.idx, "post":s.post.idx, "w":s.w, "delay":s.delay} for s in synapses]
     with open(fname, "w") as f: json.dump(data, f)
 
 def load_checkpoint(net, fname):
-    if not os.path.exists(fname): return
+    """Loads network state from a JSON file."""
+    if not os.path.exists(fname): 
+        print(f"Checkpoint file not found: {fname}")
+        return
     with open(fname, "r") as f: data = json.load(f)
     key_map = {(s.pre.idx, s.post.idx): s for s in net.synapses}
     for item in data:
