@@ -8,8 +8,8 @@ import websockets
 
 # Config
 # --- IMPORTANT: CHANGE THESE LINES TO YOUR RENDER URL ---
-WS_URL = "wss://brain-server-2z7w.onrender.com/ws"  # <--- CHANGE THIS
-SERVER_API = "https://brain-server-2z7w.onrender.com" # <--- CHANGE THIS
+WS_URL = "wss://sturdy-space-goggles-rvqqpw4wrw7fv77-8000.app.github.dev"  # <--- CHANGE THIS
+SERVER_API = "https://sturdy-space-goggles-rvqqpw4wrw7fv77-8000.app.github.dev/" # <--- CHANGE THIS
 # --- ---
 
 OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY") # Set this in your terminal
@@ -135,3 +135,4 @@ if __name__ == "__main__":
         print("The AI Twin will run in 'Simulated' mode.")
         print("="*50)
     asyncio.run(run_twin())
+
