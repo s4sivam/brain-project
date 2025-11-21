@@ -8,7 +8,7 @@ import websockets
 
 # Config
 # --- IMPORTANT: CHANGE THESE LINES TO YOUR RENDER URL ---
-WS_URL = "wss://humble-space-enigma-66wrgpj44wh5q79-8000.app.github.dev"  # <--- CHANGE THIS
+WS_URL = "wss://humble-space-enigma-66wrgpj44wh5q79-8000.app.github.dev/"  # <--- CHANGE THIS
 SERVER_API = "https://humble-space-enigma-66wrgpj44wh5q79-8000.app.github.dev/" # <--- CHANGE THIS
 # --- ---
 
@@ -135,6 +135,7 @@ if __name__ == "__main__":
         print("The AI Twin will run in 'Simulated' mode.")
         print("="*50)
     asyncio.run(run_twin())
+
 
 
 
